@@ -81,6 +81,22 @@ describe('template middleware', () => {
         config.titleLengthLimit = originalLimit;
     });
 
+    it('converts UTC+8 pubDate strings to ISO8601 for non-rss formats', async () => {
+        const data = {
+            title: 'Test',
+            item: [
+                {
+                    title: 'Item',
+                    pubDate: '2019-01-01 00:00:00 +08:00',
+                },
+            ],
+        };
+        const ctx = createCtx({ format: 'json' }, data);
+        await template(ctx as any, async () => {});
+
+        expect(data.item[0].pubDate).toBe('2018-12-31T16:00:00.000Z');
+    });
+
     it('clears invalid dates for non-rss formats', async () => {
         const data = {
             title: 'Test',

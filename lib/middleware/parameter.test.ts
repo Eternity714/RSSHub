@@ -391,7 +391,7 @@ describe('mess parameter', () => {
         const response = await app.request('/test/mess');
         expect(response.status).toBe(200);
         const parsed = await parser.parseString(await response.text());
-        expect(parsed.items[0].pubDate).toBe('Mon, 31 Dec 2018 16:00:00 GMT');
+        expect(parsed.items[0].pubDate).toBe('2019-01-01 00:00:00 +08:00');
         expect(parsed.items[0].link).toBe('https://github.com/DIYgod/RSSHub/issues/0');
     });
 });

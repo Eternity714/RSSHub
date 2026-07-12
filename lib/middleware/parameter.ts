@@ -12,6 +12,7 @@ import { simplecc } from 'simplecc-wasm';
 import { config } from '@/config';
 import type { Data, DataItem } from '@/types';
 import cache from '@/utils/cache';
+import { formatDateToUTC8 } from '@/utils/common-utils';
 import ofetch from '@/utils/ofetch';
 
 const md = markdownit({
@@ -89,7 +90,7 @@ const middleware: MiddlewareHandler = async (ctx, next) => {
 
             // handle pubDate
             if (item.pubDate) {
-                item.pubDate = new Date(item.pubDate).toUTCString();
+                item.pubDate = formatDateToUTC8(item.pubDate);
             }
 
             // handle link

@@ -10,6 +10,8 @@ const toTitleCase = (str: string) => title(str);
 
 const rWhitespace = /\s+/;
 const rAllWhitespace = /\s+/g;
+const UTC8_OFFSET = 8 * 60 * 60 * 1000;
+const padNumber = (num: number) => num.toString().padStart(2, '0');
 
 // collapse all whitespaces into a single space (like "white-space: normal;" would do), and trim
 const collapseWhitespace = (str?: string | null) => {
@@ -17,6 +19,24 @@ const collapseWhitespace = (str?: string | null) => {
         return str.replaceAll(rAllWhitespace, ' ').trim();
     }
     return str;
+};
+
+const formatDateToUTC8 = (date?: string | Date | number | null) => {
+    if (!date) {
+        return date;
+    }
+
+    if (typeof date !== 'object') {
+        date = parseDate(date);
+    }
+
+    if (Number.isNaN(date.getTime())) {
+        return 'Invalid Date';
+    }
+
+    const utc8Date = new Date(date.getTime() + UTC8_OFFSET);
+
+    return `${utc8Date.getUTCFullYear()}-${padNumber(utc8Date.getUTCMonth() + 1)}-${padNumber(utc8Date.getUTCDate())} ${padNumber(utc8Date.getUTCHours())}:${padNumber(utc8Date.getUTCMinutes())}:${padNumber(utc8Date.getUTCSeconds())} +08:00`;
 };
 
 const convertDateToISO8601 = (date?: string | Date | number | null) => {
@@ -48,4 +68,4 @@ const getLocalhostAddress = () => {
     return address;
 };
 
-export { collapseWhitespace, convertDateToISO8601, getLocalhostAddress, getSubPath, toTitleCase };
+export { collapseWhitespace, convertDateToISO8601, formatDateToUTC8, getLocalhostAddress, getSubPath, toTitleCase };
