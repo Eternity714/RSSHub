@@ -19,10 +19,22 @@ const middleware: MiddlewareHandler = async (ctx, next) => {
     }
 
     const requestPath = ctx.req.path;
-    const format = `:${ctx.req.query('format') || 'rss'}`;
-    const limit = ctx.req.query('limit') ? `:${ctx.req.query('limit')}` : '';
-    const key = 'rsshub:koa-redis-cache:' + h64ToString(requestPath + format + limit);
-    const controlKey = 'rsshub:path-requested:' + h64ToString(requestPath + format + limit);
+    const searchParams = new URLSearchParams(new URL(ctx.req.url).searchParams);
+    const format = searchParams.get('format') || 'rss';
+    const limit = searchParams.get('limit');
+
+    // 保留历史默认语义，同时让其余 query 参数隔离缓存结果。
+    searchParams.delete('format');
+    searchParams.delete('limit');
+    searchParams.set('format', format);
+    if (limit) {
+        searchParams.set('limit', limit);
+    }
+    searchParams.sort();
+
+    const cacheIdentifier = `${requestPath}?${searchParams.toString()}`;
+    const key = 'rsshub:koa-redis-cache:' + h64ToString(cacheIdentifier);
+    const controlKey = 'rsshub:path-requested:' + h64ToString(cacheIdentifier);
 
     let value = await cacheModule.globalCache.get(key);
 
