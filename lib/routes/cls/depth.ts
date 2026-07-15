@@ -1,5 +1,4 @@
 import { load } from 'cheerio';
-import dayjs from 'dayjs';
 import pMap from 'p-map';
 
 import { config } from '@/config';
@@ -33,10 +32,37 @@ const categories = {
 
 const historicalPageCacheExpire = 90 * 24 * 60 * 60;
 const initialPageCacheExpire = config.cache.routeExpire;
+const datePattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const depthSearchParams = {
     app: 'CailianpressWeb',
     appName: undefined,
     rn: 20,
+};
+
+const getUtcDate = (dateString, fieldName, defaultDate) => {
+    const date = dateString ?? defaultDate;
+    if (!datePattern.test(date)) {
+        throw new InvalidParameterError(`Invalid ${fieldName} format. Expected YYYY-MM-DD.`);
+    }
+
+    const [year, month, day] = date.split('-').map(Number);
+    const timestamp = Date.UTC(year, month - 1, day);
+    const parsedDate = new Date(timestamp);
+    if (parsedDate.getUTCFullYear() !== year || parsedDate.getUTCMonth() !== month - 1 || parsedDate.getUTCDate() !== day) {
+        throw new InvalidParameterError(`Invalid ${fieldName}. Expected a valid YYYY-MM-DD date.`);
+    }
+
+    return date;
+};
+
+const getCurrentUtcDate = (offset = 0) => {
+    const date = new Date();
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + offset)).toISOString().slice(0, 10);
+};
+
+const getUtcTimestamp = (dateString, endOfDay = false) => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return Math.floor(Date.UTC(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0) / 1000);
 };
 
 const getDepthSearchParams = (category, moreParams?) =>
@@ -120,11 +146,15 @@ export const route: Route = {
 
 async function handler(ctx) {
     const category = ctx.req.param('category') ?? '1000';
-    const beginDate = ctx.req.query('beginDate') ? dayjs(parseDate(ctx.req.query('beginDate'))).format('YYYY-MM-DD') : dayjs().subtract(2, 'day').format('YYYY-MM-DD');
-    const endDate = ctx.req.query('endDate') ? dayjs(parseDate(ctx.req.query('endDate'))).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+    const beginDate = getUtcDate(ctx.req.query('beginDate'), 'beginDate', getCurrentUtcDate(-2));
+    const endDate = getUtcDate(ctx.req.query('endDate'), 'endDate', getCurrentUtcDate());
 
-    const beginDateTimestamp = Math.floor(new Date(`${beginDate}T00:00:00+08:00`).getTime() / 1000);
-    const endDateTimestamp = Math.floor(new Date(`${endDate}T23:59:59+08:00`).getTime() / 1000);
+    if (beginDate > endDate) {
+        throw new InvalidParameterError('beginDate must be earlier than or equal to endDate.');
+    }
+
+    const beginDateTimestamp = getUtcTimestamp(beginDate);
+    const endDateTimestamp = getUtcTimestamp(endDate, true);
 
     const title = categories[category];
 

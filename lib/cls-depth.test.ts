@@ -91,6 +91,42 @@ describe('CLS 深度路由', () => {
         expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('detail request failed'));
     });
 
+    it('按 UTC 日期边界筛选文章', async () => {
+        const begin = 1_783_382_400;
+        const end = 1_783_468_799;
+        ofetch.mockImplementation((url) => {
+            if (url.includes('/v3/depth/home/assembled/')) {
+                return {
+                    data: {
+                        depth_list: [
+                            { id: 'before', title: '前一天', ctime: begin - 1, source: 'CLS' },
+                            { id: 'begin', title: 'UTC 起始', ctime: begin, source: 'CLS' },
+                            { id: 'end', title: 'UTC 结束', ctime: end, source: 'CLS' },
+                            { id: 'after', title: '后一天', ctime: end + 1, source: 'CLS' },
+                        ],
+                    },
+                };
+            }
+            if (url.includes('/v3/depth/list/')) {
+                return { data: [] };
+            }
+            return '<script id="__NEXT_DATA__">{"props":{"pageProps":{"articleDetail":{"content":"正文"}}}}</script>';
+        });
+
+        const handler = await getHandler();
+        const result: any = await handler(createContext({ beginDate: '2026-07-07', endDate: '2026-07-07' }));
+
+        expect(result.item.map((item) => item.title)).toEqual(['UTC 起始', 'UTC 结束']);
+    });
+
+    it('拒绝无效、非日期格式和倒序的 UTC 日期范围', async () => {
+        const handler = await getHandler();
+
+        await expect(handler(createContext({ beginDate: '2026-07-07T00:00:00Z' }))).rejects.toThrow('Expected YYYY-MM-DD');
+        await expect(handler(createContext({ beginDate: '2026-02-30' }))).rejects.toThrow('Expected a valid YYYY-MM-DD date');
+        await expect(handler(createContext({ beginDate: '2026-07-08', endDate: '2026-07-07' }))).rejects.toThrow('beginDate must be earlier than or equal to endDate');
+    });
+
     it('将详情请求并发限制为 3', async () => {
         const timestamp = Math.floor(new Date('2026-07-07T23:59:59+08:00').getTime() / 1000);
         let inFlight = 0;
