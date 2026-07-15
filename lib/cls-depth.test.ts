@@ -8,7 +8,7 @@ vi.mock('@/utils/ofetch', () => ({ default: ofetch }));
 vi.mock('@/utils/cache', () => ({ default: { tryGet: cacheTryGet } }));
 vi.mock('@/utils/logger', () => ({ default: { warn: loggerWarn } }));
 
-const getHandler = async () => (await import('./depth')).route.handler;
+const getHandler = async () => (await import('./routes/cls/depth')).route.handler;
 const createContext = (query = {}): any => ({
     req: {
         param: () => '1000',
