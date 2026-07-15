@@ -62,7 +62,9 @@ describe('CLS 深度路由', () => {
         expect(cacheTryGet).toHaveBeenCalledWith('cls:depth:home:1000', expect.any(Function), expect.any(Number), false);
         expect(cacheTryGet).toHaveBeenCalledWith(`cls:depth:list:1000:${timestamp}`, expect.any(Function), 90 * 24 * 60 * 60, false);
         expect(result.item).toHaveLength(3);
-        expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('invalid cursor'));
+        const diagnostic = JSON.parse(loggerWarn.mock.calls[0][0]);
+        expect(diagnostic.stopReason).toBe('cursor_not_decreasing');
+        expect(diagnostic.event).toBe('cls_depth_pagination_diagnostic');
     });
 
     it('跳过非法时间戳，并在详情请求失败时保留基础条目', async () => {
@@ -89,6 +91,35 @@ describe('CLS 深度路由', () => {
         expect(result.item[0]).toMatchObject({ title: '有效文章', author: 'CLS' });
         expect(result.item[0].description).toBeUndefined();
         expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('detail request failed'));
+    });
+
+    it('在历史页为空且无匹配文章时记录分页诊断', async () => {
+        const timestamp = 1_783_555_200;
+        ofetch.mockImplementation((url) => {
+            if (url.includes('/v3/depth/home/assembled/')) {
+                return { data: { depth_list: [{ id: 'recent', title: '较新文章', ctime: timestamp, source: 'CLS' }] } };
+            }
+            if (url.includes('/v3/depth/list/')) {
+                return { data: [] };
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+
+        const handler = await getHandler();
+        const result: any = await handler(createContext({ beginDate: '2026-07-07', endDate: '2026-07-07' }));
+
+        expect(result.item).toHaveLength(0);
+        expect(loggerWarn).toHaveBeenCalledTimes(1);
+        const diagnostic = JSON.parse(loggerWarn.mock.calls[0][0]);
+        expect(diagnostic).toMatchObject({
+            event: 'cls_depth_pagination_diagnostic',
+            beginDateTimestamp: 1_783_382_400,
+            endDateTimestamp: 1_783_468_799,
+            stopReason: 'historical_page_empty',
+            pageCount: 2,
+            listPageCount: 1,
+            totalMatched: 0,
+        });
     });
 
     it('按 UTC 日期边界筛选文章', async () => {

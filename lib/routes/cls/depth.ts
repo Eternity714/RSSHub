@@ -78,6 +78,22 @@ const filterArticles = (articles, beginDateTimestamp, endDateTimestamp) =>
         return Number.isFinite(timestamp) && timestamp >= beginDateTimestamp && timestamp <= endDateTimestamp;
     });
 
+const summarizePage = (source, cursor, articles, beginDateTimestamp, endDateTimestamp, addedCount) => {
+    const timestamps = articles.map((item) => Number(item.ctime)).filter((timestamp) => Number.isFinite(timestamp));
+    return {
+        source,
+        cursor,
+        itemCount: articles.length,
+        newestCtime: timestamps.length ? Math.max(...timestamps) : null,
+        oldestCtime: timestamps.length ? Math.min(...timestamps) : null,
+        inRangeCount: filterArticles(articles, beginDateTimestamp, endDateTimestamp).length,
+        addedCount,
+        invalidCtimeCount: articles.length - timestamps.length,
+    };
+};
+
+const getErrorMessage = (error) => (error instanceof Error ? error.message : String(error)).slice(0, 500);
+
 async function getInitialPage(category) {
     const response = await cache.tryGet(`cls:depth:home:${category}`, async () => await ofetch(`${rootUrl}/v3/depth/home/assembled/${category}`, { query: getDepthSearchParams(category) }), initialPageCacheExpire, false);
     const articles = response.data?.depth_list;
@@ -163,36 +179,96 @@ async function handler(ctx) {
     }
 
     const currentUrl = `${rootUrl}/depth?id=${category}`;
+    const diagnostic = {
+        event: 'cls_depth_pagination_diagnostic',
+        version: 1,
+        category,
+        beginDate,
+        endDate,
+        beginDateTimestamp,
+        endDateTimestamp,
+        pageCount: 0,
+        listPageCount: 0,
+        lastCursor: null as number | null,
+        totalFetched: 0,
+        totalMatched: 0,
+        duplicateCount: 0,
+        invalidCtimeCount: 0,
+        firstPage: null as Record<string, any> | null,
+        lastPage: null as Record<string, any> | null,
+    };
+    let stopReason = '';
+    const warnDiagnostic = (extra = {}) => logger.warn(JSON.stringify({ ...diagnostic, ...extra, stopReason }));
     const articles: any[] = [];
     const articleIds = new Set();
-    let currentArticles = await getInitialPage(category);
+    let currentArticles;
+
+    try {
+        currentArticles = await getInitialPage(category);
+    } catch (error) {
+        stopReason = 'initial_page_error';
+        warnDiagnostic({ phase: 'initial_page', errorMessage: getErrorMessage(error) });
+        throw error;
+    }
+
     let lastTime: number | undefined;
+    let source = 'assembled';
 
     while (true) {
+        diagnostic.pageCount++;
+        diagnostic.totalFetched += currentArticles.length;
+
         if (currentArticles.length === 0) {
+            stopReason = source === 'assembled' ? 'initial_page_empty' : 'historical_page_empty';
+            diagnostic.lastPage = summarizePage(source, lastTime, currentArticles, beginDateTimestamp, endDateTimestamp, 0);
             break;
         }
 
-        const newArticles = filterArticles(currentArticles, beginDateTimestamp, endDateTimestamp).filter((item) => !articleIds.has(item.id));
+        const matchedArticles = filterArticles(currentArticles, beginDateTimestamp, endDateTimestamp);
+        const newArticles = matchedArticles.filter((item) => !articleIds.has(item.id));
+        diagnostic.totalMatched += matchedArticles.length;
+        diagnostic.duplicateCount += matchedArticles.length - newArticles.length;
+        diagnostic.invalidCtimeCount += currentArticles.length - currentArticles.filter((item) => Number.isFinite(Number(item.ctime))).length;
+        const pageSummary = summarizePage(source, lastTime, currentArticles, beginDateTimestamp, endDateTimestamp, newArticles.length);
+        diagnostic.firstPage ??= pageSummary;
+        diagnostic.lastPage = pageSummary;
         for (const item of newArticles) {
             articleIds.add(item.id);
         }
         articles.push(...newArticles);
 
         const currentLastTime = Number(currentArticles.at(-1).ctime);
-        if (!Number.isFinite(currentLastTime) || (lastTime !== undefined && currentLastTime >= lastTime)) {
-            logger.warn(`CLS depth pagination stopped due to invalid cursor: category=${category}, beginDate=${beginDate}, endDate=${endDate}, lastTime=${lastTime}, currentLastTime=${currentLastTime}`);
+        if (!Number.isFinite(currentLastTime)) {
+            stopReason = 'invalid_cursor';
+            break;
+        }
+        if (lastTime !== undefined && currentLastTime >= lastTime) {
+            stopReason = 'cursor_not_decreasing';
             break;
         }
 
         if (currentLastTime < beginDateTimestamp) {
+            stopReason = 'range_reached';
             break;
         }
 
         lastTime = currentLastTime;
-        // 后续请求依赖上一次响应中的 ctime，无法并行请求
-        // eslint-disable-next-line no-await-in-loop
-        currentArticles = await getHistoricalPage(category, lastTime);
+        diagnostic.lastCursor = lastTime;
+        diagnostic.listPageCount++;
+        source = 'list';
+        try {
+            // 后续请求依赖上一次响应中的 ctime，无法并行请求
+            // eslint-disable-next-line no-await-in-loop
+            currentArticles = await getHistoricalPage(category, lastTime);
+        } catch (error) {
+            stopReason = 'historical_page_error';
+            warnDiagnostic({ phase: 'historical_page', errorMessage: getErrorMessage(error) });
+            throw error;
+        }
+    }
+
+    if (articles.length === 0 || ['invalid_cursor', 'cursor_not_decreasing'].includes(stopReason)) {
+        warnDiagnostic();
     }
 
     let items: any[] = articles.map((item) => ({
