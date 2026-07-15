@@ -23,16 +23,25 @@ beforeEach(() => {
 });
 
 describe('CLS 深度路由', () => {
-    it('在游标没有严格递减时停止分页并保留已获取条目', async () => {
+    it('从首屏获取 cursor，并使用首屏末项时间请求下一页', async () => {
         const timestamp = Math.floor(new Date('2026-07-07T23:59:59+08:00').getTime() / 1000);
-        let listRequests = 0;
+        const nextTimestamp = timestamp - 1;
         ofetch.mockImplementation((url) => {
+            if (url.includes('/v3/depth/home/assembled/')) {
+                return {
+                    data: {
+                        depth_list: [
+                            { id: 'valid', title: '有效文章', ctime: timestamp, source: 'CLS' },
+                            { id: 'cursor', title: '游标文章', ctime: timestamp, source: 'CLS' },
+                        ],
+                    },
+                };
+            }
             if (url.includes('/v3/depth/list/')) {
-                listRequests++;
                 return {
                     data: [
-                        { id: 'valid', title: '有效文章', ctime: timestamp, source: 'CLS' },
-                        { id: 'cursor', title: '游标文章', ctime: timestamp, source: 'CLS' },
+                        { id: 'next', title: '下一页文章', ctime: nextTimestamp, source: 'CLS' },
+                        { id: 'cursor', title: '重复游标', ctime: timestamp, source: 'CLS' },
                     ],
                 };
             }
@@ -42,25 +51,32 @@ describe('CLS 深度路由', () => {
         const handler = await getHandler();
         const result: any = await handler(createContext({ beginDate: '2026-07-07', endDate: '2026-07-07' }));
 
-        const [apiUrl, options] = ofetch.mock.calls[0];
-        expect(apiUrl).toContain('/v3/depth/list/1000');
-        expect(options.query).toMatchObject({ app: 'CailianpressWeb', id: '1000', last_time: timestamp + '', os: 'web', rn: '20', sv: '8.7.9' });
-        expect(options.query.sign).toBe('b0ee8b38f651ac282bdf1b99ad6f2a2c');
-        expect(listRequests).toBe(1);
-        expect(result.item).toHaveLength(2);
+        const [homeUrl, homeOptions] = ofetch.mock.calls[0];
+        const [listUrl, listOptions] = ofetch.mock.calls[1];
+        expect(homeUrl).toContain('/v3/depth/home/assembled/1000');
+        expect(homeOptions.query).toMatchObject({ app: 'CailianpressWeb', id: '1000', os: 'web', rn: '20', sv: '8.7.9' });
+        expect(homeOptions.query).not.toHaveProperty('appName');
+        expect(homeOptions.query).not.toHaveProperty('last_time');
+        expect(listUrl).toContain('/v3/depth/list/1000');
+        expect(listOptions.query).toMatchObject({ app: 'CailianpressWeb', id: '1000', last_time: timestamp + '', os: 'web', rn: '20', sv: '8.7.9' });
+        expect(cacheTryGet).toHaveBeenCalledWith('cls:depth:home:1000', expect.any(Function), expect.any(Number), false);
+        expect(cacheTryGet).toHaveBeenCalledWith(`cls:depth:list:1000:${timestamp}`, expect.any(Function), 90 * 24 * 60 * 60, false);
+        expect(result.item).toHaveLength(3);
         expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('invalid cursor'));
     });
 
     it('跳过非法时间戳，并在详情请求失败时保留基础条目', async () => {
         const timestamp = Math.floor(new Date('2026-07-07T23:59:59+08:00').getTime() / 1000);
         ofetch.mockImplementation((url) => {
-            if (url.includes('/v3/depth/list/')) {
+            if (url.includes('/v3/depth/home/assembled/')) {
                 return {
-                    data: [
-                        { id: 'valid', title: '有效文章', ctime: timestamp, source: 'CLS' },
-                        { id: 'invalid', title: '非法文章', ctime: 'bad-time', source: 'CLS' },
-                        { id: 'old', title: '旧文章', ctime: timestamp - 24 * 60 * 60, source: 'CLS' },
-                    ],
+                    data: {
+                        depth_list: [
+                            { id: 'valid', title: '有效文章', ctime: timestamp, source: 'CLS' },
+                            { id: 'invalid', title: '非法文章', ctime: 'bad-time', source: 'CLS' },
+                            { id: 'old', title: '旧文章', ctime: timestamp - 24 * 60 * 60, source: 'CLS' },
+                        ],
+                    },
                 };
             }
             throw new Error('detail unavailable');
@@ -80,15 +96,20 @@ describe('CLS 深度路由', () => {
         let inFlight = 0;
         let maxInFlight = 0;
         ofetch.mockImplementation(async (url) => {
-            if (url.includes('/v3/depth/list/')) {
+            if (url.includes('/v3/depth/home/assembled/')) {
                 return {
-                    data: [
-                        { id: 'one', title: '文章 1', ctime: timestamp, source: 'CLS' },
-                        { id: 'two', title: '文章 2', ctime: timestamp, source: 'CLS' },
-                        { id: 'three', title: '文章 3', ctime: timestamp, source: 'CLS' },
-                        { id: 'four', title: '文章 4', ctime: timestamp, source: 'CLS' },
-                    ],
+                    data: {
+                        depth_list: [
+                            { id: 'one', title: '文章 1', ctime: timestamp, source: 'CLS' },
+                            { id: 'two', title: '文章 2', ctime: timestamp, source: 'CLS' },
+                            { id: 'three', title: '文章 3', ctime: timestamp, source: 'CLS' },
+                            { id: 'four', title: '文章 4', ctime: timestamp, source: 'CLS' },
+                        ],
+                    },
                 };
+            }
+            if (url.includes('/v3/depth/list/')) {
+                return { data: [] };
             }
 
             inFlight++;

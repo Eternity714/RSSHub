@@ -2,6 +2,7 @@ import { load } from 'cheerio';
 import dayjs from 'dayjs';
 import pMap from 'p-map';
 
+import { config } from '@/config';
 import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
 import cache from '@/utils/cache';
@@ -29,6 +30,72 @@ const categories = {
     1124: '期货',
     1176: '投教',
 };
+
+const historicalPageCacheExpire = 90 * 24 * 60 * 60;
+const initialPageCacheExpire = config.cache.routeExpire;
+const depthSearchParams = {
+    app: 'CailianpressWeb',
+    appName: undefined,
+    rn: 20,
+};
+
+const getDepthSearchParams = (category, moreParams?) =>
+    getSearchParams({
+        ...depthSearchParams,
+        id: category,
+        ...moreParams,
+    });
+
+const filterArticles = (articles, beginDateTimestamp, endDateTimestamp) =>
+    articles.filter((item) => {
+        const timestamp = Number(item.ctime);
+        return Number.isFinite(timestamp) && timestamp >= beginDateTimestamp && timestamp <= endDateTimestamp;
+    });
+
+async function getInitialPage(category) {
+    const response = await cache.tryGet(`cls:depth:home:${category}`, async () => await ofetch(`${rootUrl}/v3/depth/home/assembled/${category}`, { query: getDepthSearchParams(category) }), initialPageCacheExpire, false);
+    const articles = response.data?.depth_list;
+
+    if (!Array.isArray(articles)) {
+        throw new TypeError(`Unexpected CLS depth home response for category ${category}`);
+    }
+
+    return articles;
+}
+
+async function getHistoricalPage(category, cursor) {
+    const cacheKey = `cls:depth:list:${category}:${cursor}`;
+    const emptyPageError = new Error('CLS depth historical page is empty');
+
+    try {
+        const response = await cache.tryGet(
+            cacheKey,
+            async () => {
+                const response = await ofetch(`${rootUrl}/v3/depth/list/${category}`, { query: getDepthSearchParams(category, { last_time: cursor }) });
+                if (!Array.isArray(response.data)) {
+                    throw new TypeError(`Unexpected CLS depth list response for category ${category}`);
+                }
+                if (response.data.length === 0) {
+                    throw emptyPageError;
+                }
+                return response;
+            },
+            historicalPageCacheExpire,
+            false
+        );
+
+        if (!Array.isArray(response.data)) {
+            throw new TypeError(`Unexpected CLS depth list response for category ${category}`);
+        }
+
+        return response.data;
+    } catch (error) {
+        if (error === emptyPageError) {
+            return [];
+        }
+        throw error;
+    }
+}
 
 export const route: Route = {
     path: '/depth/:category?',
@@ -65,41 +132,25 @@ async function handler(ctx) {
         throw new InvalidParameterError('Bad category. See <a href="https://docs.rsshub.app/routes/finance#cai-lian-she-shen-du">docs</a>');
     }
 
-    const apiUrl = `${rootUrl}/v3/depth/list/${category}`;
     const currentUrl = `${rootUrl}/depth?id=${category}`;
-
     const articles: any[] = [];
-    let lastTime = endDateTimestamp;
+    const articleIds = new Set();
+    let currentArticles = await getInitialPage(category);
+    let lastTime: number | undefined;
 
     while (true) {
-        // 后续请求依赖上一次响应中的 ctime，无法并行请求
-        // eslint-disable-next-line no-await-in-loop
-        const response = await ofetch(apiUrl, {
-            query: getSearchParams({
-                id: category,
-                last_time: lastTime,
-                rn: 20,
-            }),
-        });
-        const currentArticles = response.data;
-
-        if (!Array.isArray(currentArticles)) {
-            throw new TypeError(`Unexpected CLS depth list response for category ${category}`);
-        }
-
         if (currentArticles.length === 0) {
             break;
         }
 
-        articles.push(
-            ...currentArticles.filter((item) => {
-                const timestamp = Number(item.ctime);
-                return Number.isFinite(timestamp) && timestamp >= beginDateTimestamp && timestamp <= endDateTimestamp;
-            })
-        );
+        const newArticles = filterArticles(currentArticles, beginDateTimestamp, endDateTimestamp).filter((item) => !articleIds.has(item.id));
+        for (const item of newArticles) {
+            articleIds.add(item.id);
+        }
+        articles.push(...newArticles);
 
         const currentLastTime = Number(currentArticles.at(-1).ctime);
-        if (!Number.isFinite(currentLastTime) || currentLastTime >= lastTime) {
+        if (!Number.isFinite(currentLastTime) || (lastTime !== undefined && currentLastTime >= lastTime)) {
             logger.warn(`CLS depth pagination stopped due to invalid cursor: category=${category}, beginDate=${beginDate}, endDate=${endDate}, lastTime=${lastTime}, currentLastTime=${currentLastTime}`);
             break;
         }
@@ -109,6 +160,9 @@ async function handler(ctx) {
         }
 
         lastTime = currentLastTime;
+        // 后续请求依赖上一次响应中的 ctime，无法并行请求
+        // eslint-disable-next-line no-await-in-loop
+        currentArticles = await getHistoricalPage(category, lastTime);
     }
 
     let items: any[] = articles.map((item) => ({

@@ -3,7 +3,7 @@ import CryptoJS from 'crypto-js';
 const rootUrl = 'https://www.cls.cn';
 
 const params = {
-    app: 'CailianpressWeb',
+    appName: 'CailianpressWeb',
     os: 'web',
     sv: '8.7.9',
 };
