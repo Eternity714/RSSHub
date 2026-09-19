@@ -158,6 +158,37 @@ describe('cache', () => {
         await noCacheTestFunc();
     });
 
+    it('isolates cache by canonical query', async () => {
+        process.env.CACHE_TYPE = 'memory';
+        const app = (await import('@/app')).default;
+
+        const response1 = await app.request('/test/1?beginDate=2026-07-07&endDate=2026-07-13');
+        const response2 = await app.request('/test/1?endDate=2026-07-13&beginDate=2026-07-07');
+        const response3 = await app.request('/test/1?beginDate=2026-07-08&endDate=2026-07-13');
+
+        expect(response1.headers.get('rsshub-cache-status')).toBeNull();
+        expect(response2.headers.get('rsshub-cache-status')).toBe('HIT');
+        expect(response3.headers.get('rsshub-cache-status')).toBeNull();
+
+        const defaultFormat = await app.request('/test/1');
+        const emptyFormat = await app.request('/test/1?format=');
+        const rssFormat = await app.request('/test/1?format=rss');
+        const emptyLimit = await app.request('/test/1?limit=');
+        const atomFormat = await app.request('/test/1?format=atom');
+
+        expect(defaultFormat.headers.get('rsshub-cache-status')).toBeNull();
+        expect(emptyFormat.headers.get('rsshub-cache-status')).toBe('HIT');
+        expect(rssFormat.headers.get('rsshub-cache-status')).toBe('HIT');
+        expect(emptyLimit.headers.get('rsshub-cache-status')).toBe('HIT');
+        expect(atomFormat.headers.get('rsshub-cache-status')).toBeNull();
+
+        const limit10 = await app.request('/test/1?limit=10');
+        const limit20 = await app.request('/test/1?limit=20');
+
+        expect(limit10.headers.get('rsshub-cache-status')).toBeNull();
+        expect(limit20.headers.get('rsshub-cache-status')).toBeNull();
+    });
+
     it('throws URL key', async () => {
         process.env.CACHE_TYPE = 'memory';
         const app = (await import('@/app')).default;

@@ -28,6 +28,7 @@ describe('cache middleware', () => {
         const ctx = {
             req: {
                 path: '/test',
+                url: 'http://localhost/test',
                 query: () => null,
             },
             res: {
