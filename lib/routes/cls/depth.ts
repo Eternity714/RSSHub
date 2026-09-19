@@ -66,7 +66,7 @@ async function handler(ctx) {
     const apiUrl = `${rootUrl}/v3/depth/list/${category}`;
     const currentUrl = `${rootUrl}/depth?id=${category}`;
 
-    const articles = [];
+    const articles: any[] = [];
     let lastTime = endDateTimestamp;
 
     while (true) {
@@ -74,7 +74,7 @@ async function handler(ctx) {
         // eslint-disable-next-line no-await-in-loop
         const response = await ofetch(apiUrl, {
             query: getSearchParams({
-                last_time: lastTime,
+                last_time: lastTime.toString(),
             }),
         });
         const currentArticles = response.data;

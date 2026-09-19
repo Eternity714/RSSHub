@@ -2,7 +2,7 @@ import { load } from 'cheerio';
 import dayjs from 'dayjs';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
@@ -63,7 +63,7 @@ function parseDateParameter(value: string, fieldName: string, defaultValue: stri
     return value;
 }
 
-async function request(category, beginTime, endTime, pageNo, pageSize) {
+async function request(category: string, beginTime: string, endTime: string, pageNo: number, pageSize: number): Promise<DataItem[]> {
     if (category === 'stock') {
         const { data: response } = await got.post(reqUrlStock, {
             json: {
@@ -112,7 +112,7 @@ async function handler(ctx) {
     const beginDate = parseDateParameter(ctx.req.query('beginDate') ?? '', 'beginDate', dayjs().subtract(2, 'day').format('YYYY-MM-DD'));
     const endDate = parseDateParameter(ctx.req.query('endDate') ?? '', 'endDate', dayjs().format('YYYY-MM-DD'));
 
-    const items = [];
+    const items: DataItem[] = [];
     let page = 1;
 
     while (true) {
@@ -131,9 +131,9 @@ async function handler(ctx) {
 
     const feedItems = await Promise.all(
         items.map(async (item) => {
-            const cached = await cache.tryGet(item.link, async () => {
+            const cached = await cache.tryGet(item.link!, async () => {
                 try {
-                    const { data: response } = await got(item.link);
+                    const { data: response } = await got(item.link!);
                     const $ = load(response);
 
                     const pdfLink = $('.pdf-link').attr('href');
