@@ -1,5 +1,4 @@
 import type { Context } from 'hono';
-import { CookieJar } from 'tough-cookie';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
@@ -84,14 +83,6 @@ async function handler(ctx: Context) {
 
     const url = `https://www.cninfo.com.cn/new/disclosure/stock?stockCode=${code}&orgId=${orgId}`;
     const apiUrl = 'https://www.cninfo.com.cn/new/hisAnnouncement/query';
-    const cookieJar = new CookieJar();
-    const sessionResponse = await ofetch.raw(url);
-
-    await Promise.all(sessionResponse.headers.getSetCookie().map((cookie) => cookieJar.setCookie(cookie, url)));
-    const cookie = await cookieJar.getCookieString(apiUrl);
-    if (!cookie.includes('JSESSIONID=')) {
-        throw new Error('Unable to initialize CNInfo session: JSESSIONID cookie was not returned.');
-    }
 
     const body = new FormData();
     body.append('stock', `${code},${orgId}`);
@@ -112,9 +103,6 @@ async function handler(ctx: Context) {
         method: 'POST',
         headers: {
             Accept: '*/*',
-            Cookie: cookie,
-            Origin: 'https://www.cninfo.com.cn',
-            Referer: url,
             'X-Requested-With': 'XMLHttpRequest',
         },
         body,
