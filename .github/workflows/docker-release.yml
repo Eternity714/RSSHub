@@ -61,7 +61,7 @@ jobs:
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+                  password: ${{ secrets.GHCR_TOKEN }}
 
             - name: Extract Docker metadata (ordinary version)
               id: meta-ordinary
@@ -87,7 +87,6 @@ jobs:
               with:
                   context: .
                   tags: ${{ steps.image-name-ordinary.outputs.tags }}
-                  labels: ${{ steps.meta-ordinary.outputs.labels }}
                   platforms: ${{ matrix.platform }}
                   cache-from: type=gha,scope=docker-release-${{ env.PLATFORM_PAIR }}
                   cache-to: type=gha,mode=max,scope=docker-release-${{ env.PLATFORM_PAIR }}
@@ -138,7 +137,6 @@ jobs:
                   context: .
                   build-args: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
                   tags: ${{ steps.image-name-chromium-bundled.outputs.tags }}
-                  labels: ${{ steps.meta-chromium-bundled.outputs.labels }}
                   platforms: ${{ matrix.platform }}
                   cache-from: |
                       type=registry,ref=${{ steps.image-name.outputs.image-name }}:chromium-bundled
@@ -181,7 +179,7 @@ jobs:
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+                  password: ${{ secrets.GHCR_TOKEN }}
 
             - name: Download digests (ordinary version)
               uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
