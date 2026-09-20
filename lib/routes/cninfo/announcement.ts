@@ -2,8 +2,8 @@ import type { Context } from 'hono';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
-import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getPlaywrightPage } from '@/utils/playwright';
 
 export const route: Route = {
     path: '/announcement/:column/:code/:orgId/:category?/:search?',
@@ -16,7 +16,10 @@ export const route: Route = {
         category: '公告分类，A 股及新三板，见下表，默认为全部',
         search: '标题关键字，默认为空',
         pageNum: '页码，正整数，默认为 1',
-        pageSize: '每页公告数量，正整数，默认为 30',
+        pageSize: '每页公告数量，1 至 30 的整数，默认为 30',
+    },
+    features: {
+        requirePuppeteer: true,
     },
     name: '公告',
     maintainers: ['LogicJake', 'hillerliao', 'laampui', 'nczitzk'],
@@ -48,14 +51,25 @@ const plateMap = {
     fund: 'fund',
 };
 
-function parsePositiveInteger(value: string | undefined, fieldName: string, defaultValue: number): number {
+type Announcement = {
+    announcementId: string;
+    announcementTime: number;
+    announcementTitle: string;
+    secName?: string;
+};
+
+type AnnouncementResponse = {
+    announcements: Announcement[];
+};
+
+function parsePositiveInteger(value: string | undefined, fieldName: string, defaultValue: number, maximum?: number): number {
     if (!value) {
         return defaultValue;
     }
 
     const parsedValue = Number(value);
-    if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsedValue) || parsedValue < 1) {
-        throw new InvalidParameterError(`Invalid ${fieldName}. Expected a positive integer.`);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsedValue) || parsedValue < 1 || (maximum && parsedValue > maximum)) {
+        throw new InvalidParameterError(`Invalid ${fieldName}. Expected a positive integer${maximum ? ` no greater than ${maximum}` : ''}.`);
     }
 
     return parsedValue;
@@ -65,32 +79,59 @@ async function handler(ctx: Context) {
     const { column, code, orgId, category = 'all', search: searchKey = '' } = ctx.req.param();
     const plate = plateMap[column] ?? '';
     const pageNum = parsePositiveInteger(ctx.req.query('pageNum'), 'pageNum', 1);
-    const pageSize = parsePositiveInteger(ctx.req.query('pageSize'), 'pageSize', 30);
+    const pageSize = parsePositiveInteger(ctx.req.query('pageSize'), 'pageSize', 30, 30);
 
-    const url = `http://www.cninfo.com.cn/new/disclosure/stock?stockCode=${code}&orgId=${orgId}`;
-    const apiUrl = 'http://www.cninfo.com.cn/new/hisAnnouncement/query';
-
-    const data = await ofetch(apiUrl, {
-        method: 'POST',
-        headers: {
-            Referer: url,
+    const url = `https://www.cninfo.com.cn/new/disclosure/stock?stockCode=${code}&orgId=${orgId}`;
+    const { page, destroy } = await getPlaywrightPage(url, {
+        onBeforeLoad: async (page) => {
+            await page.route('**/*', (route) => {
+                const resourceType = route.request().resourceType();
+                return resourceType === 'document' || resourceType === 'script' || resourceType === 'fetch' || resourceType === 'xhr'
+                    ? route.continue()
+                    : route.abort();
+            });
         },
-        body: new URLSearchParams({
-            stock: `${code},${orgId}`,
-            tabName: 'fulltext',
-            pageSize: pageSize.toString(),
-            pageNum: pageNum.toString(),
-            column,
-            category: category === 'all' ? '' : category,
-            plate,
-            seDate: '',
-            searchkey: searchKey,
-            secid: '',
-            sortName: '',
-            sortType: '',
-            isHLtitle: 'true',
-        }),
     });
+
+    let data: AnnouncementResponse;
+    try {
+        data = await page.evaluate(
+            async ({ column, category, code, orgId, pageNum, pageSize, plate, searchKey }) => {
+                const body = new FormData();
+                body.append('stock', `${code},${orgId}`);
+                body.append('tabName', 'fulltext');
+                body.append('pageSize', pageSize.toString());
+                body.append('pageNum', pageNum.toString());
+                body.append('column', column);
+                body.append('category', category === 'all' ? '' : category);
+                body.append('plate', plate);
+                body.append('seDate', '');
+                body.append('searchkey', searchKey);
+                body.append('secid', '');
+                body.append('sortName', '');
+                body.append('sortType', '');
+                body.append('isHLtitle', 'true');
+
+                const response = await fetch('/new/hisAnnouncement/query', {
+                    method: 'POST',
+                    headers: {
+                        Accept: '*/*',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body,
+                    credentials: 'include',
+                });
+                if (!response.ok) {
+                    throw new Error(`CNInfo request failed with status ${response.status}`);
+                }
+
+                return response.json();
+            },
+            { column, category, code, orgId, pageNum, pageSize, plate, searchKey }
+        );
+    } finally {
+        await destroy();
+    }
 
     const announcementsList = data.announcements;
 
@@ -102,7 +143,7 @@ async function handler(ctx: Context) {
 
             return {
                 title: item.announcementTitle,
-                link: `http://www.cninfo.com.cn/new/disclosure/detail?plate=${plate}&orgId=${orgId}&stockCode=${code}&announcementId=${item.announcementId}&announcementTime=${announcementTime}`,
+                link: `https://www.cninfo.com.cn/new/disclosure/detail?plate=${plate}&orgId=${orgId}&stockCode=${code}&announcementId=${item.announcementId}&announcementTime=${announcementTime}`,
                 pubDate: parseDate(item.announcementTime),
             };
         }),
