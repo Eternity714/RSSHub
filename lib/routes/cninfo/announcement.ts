@@ -1,9 +1,10 @@
 import type { Context } from 'hono';
+import { CookieJar } from 'tough-cookie';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
+import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
-import { getPlaywrightPage } from '@/utils/playwright';
 
 export const route: Route = {
     path: '/announcement/:column/:code/:orgId/:category?/:search?',
@@ -19,7 +20,7 @@ export const route: Route = {
         pageSize: '每页公告数量，1 至 30 的整数，默认为 30',
     },
     features: {
-        requirePuppeteer: true,
+        requirePuppeteer: false,
     },
     name: '公告',
     maintainers: ['LogicJake', 'hillerliao', 'laampui', 'nczitzk'],
@@ -82,56 +83,42 @@ async function handler(ctx: Context) {
     const pageSize = parsePositiveInteger(ctx.req.query('pageSize'), 'pageSize', 30, 30);
 
     const url = `https://www.cninfo.com.cn/new/disclosure/stock?stockCode=${code}&orgId=${orgId}`;
-    const { page, destroy } = await getPlaywrightPage(url, {
-        onBeforeLoad: async (page) => {
-            await page.route('**/*', (route) => {
-                const resourceType = route.request().resourceType();
-                return resourceType === 'document' || resourceType === 'script' || resourceType === 'fetch' || resourceType === 'xhr'
-                    ? route.continue()
-                    : route.abort();
-            });
-        },
-    });
+    const apiUrl = 'https://www.cninfo.com.cn/new/hisAnnouncement/query';
+    const cookieJar = new CookieJar();
+    const sessionResponse = await ofetch.raw(url);
 
-    let data: AnnouncementResponse;
-    try {
-        data = await page.evaluate(
-            async ({ column, category, code, orgId, pageNum, pageSize, plate, searchKey }) => {
-                const body = new FormData();
-                body.append('stock', `${code},${orgId}`);
-                body.append('tabName', 'fulltext');
-                body.append('pageSize', pageSize.toString());
-                body.append('pageNum', pageNum.toString());
-                body.append('column', column);
-                body.append('category', category === 'all' ? '' : category);
-                body.append('plate', plate);
-                body.append('seDate', '');
-                body.append('searchkey', searchKey);
-                body.append('secid', '');
-                body.append('sortName', '');
-                body.append('sortType', '');
-                body.append('isHLtitle', 'true');
-
-                const response = await fetch('/new/hisAnnouncement/query', {
-                    method: 'POST',
-                    headers: {
-                        Accept: '*/*',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body,
-                    credentials: 'include',
-                });
-                if (!response.ok) {
-                    throw new Error(`CNInfo request failed with status ${response.status}`);
-                }
-
-                return response.json();
-            },
-            { column, category, code, orgId, pageNum, pageSize, plate, searchKey }
-        );
-    } finally {
-        await destroy();
+    await Promise.all(sessionResponse.headers.getSetCookie().map((cookie) => cookieJar.setCookie(cookie, url)));
+    const cookie = await cookieJar.getCookieString(apiUrl);
+    if (!cookie.includes('JSESSIONID=')) {
+        throw new Error('Unable to initialize CNInfo session: JSESSIONID cookie was not returned.');
     }
+
+    const body = new FormData();
+    body.append('stock', `${code},${orgId}`);
+    body.append('tabName', 'fulltext');
+    body.append('pageSize', pageSize.toString());
+    body.append('pageNum', pageNum.toString());
+    body.append('column', column);
+    body.append('category', category === 'all' ? '' : category);
+    body.append('plate', plate);
+    body.append('seDate', '');
+    body.append('searchkey', searchKey);
+    body.append('secid', '');
+    body.append('sortName', '');
+    body.append('sortType', '');
+    body.append('isHLtitle', 'true');
+
+    const data = await ofetch<AnnouncementResponse>(apiUrl, {
+        method: 'POST',
+        headers: {
+            Accept: '*/*',
+            Cookie: cookie,
+            Origin: 'https://www.cninfo.com.cn',
+            Referer: url,
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body,
+    });
 
     const announcementsList = data.announcements;
 
