@@ -21,8 +21,11 @@ const middleware: MiddlewareHandler = async (ctx, next) => {
     const requestPath = ctx.req.path;
     const format = `:${ctx.req.query('format') || config.format}`;
     const limit = ctx.req.query('limit') ? `:${ctx.req.query('limit')}` : '';
-    const key = 'rsshub:koa-redis-cache:' + h64ToString(requestPath + format + limit);
-    const controlKey = 'rsshub:path-requested:' + h64ToString(requestPath + format + limit);
+    const pageNum = ctx.req.query('pageNum') ? `:${ctx.req.query('pageNum')}` : '';
+    const pageSize = ctx.req.query('pageSize') ? `:${ctx.req.query('pageSize')}` : '';
+    const cacheKey = requestPath + format + limit + pageNum + pageSize;
+    const key = 'rsshub:koa-redis-cache:' + h64ToString(cacheKey);
+    const controlKey = 'rsshub:path-requested:' + h64ToString(cacheKey);
 
     let value = await cacheModule.globalCache.get(key);
 

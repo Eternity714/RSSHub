@@ -81,6 +81,30 @@ describe('cache', () => {
         expect(parsed6.items[0].content).toBe('1 0');
     }, 10000);
 
+    it('distinguishes pagination parameters', async () => {
+        process.env.CACHE_TYPE = 'memory';
+        const app = (await import('@/app')).default;
+
+        const firstPage = await app.request('/test/cache?pageNum=1&pageSize=5');
+        const secondPage = await app.request('/test/cache?pageNum=2&pageSize=5');
+        const largerPage = await app.request('/test/cache?pageNum=1&pageSize=10');
+        const firstPageCached = await app.request('/test/cache?pageNum=1&pageSize=5');
+
+        expect(secondPage.headers).not.toHaveProperty('rsshub-cache-status');
+        expect(largerPage.headers).not.toHaveProperty('rsshub-cache-status');
+        expect(firstPageCached.headers.get('rsshub-cache-status')).toBe('HIT');
+
+        const firstPageFeed = await parser.parseString(await firstPage.text());
+        const secondPageFeed = await parser.parseString(await secondPage.text());
+        const largerPageFeed = await parser.parseString(await largerPage.text());
+        const firstPageCachedFeed = await parser.parseString(await firstPageCached.text());
+
+        expect(firstPageFeed.items[0].content).toBe('Cache1');
+        expect(secondPageFeed.items[0].content).toBe('Cache2');
+        expect(largerPageFeed.items[0].content).toBe('Cache3');
+        expect(firstPageCachedFeed.items[0].content).toBe('Cache1');
+    });
+
     it('redis', async () => {
         process.env.CACHE_TYPE = 'redis';
         const app = (await import('@/app')).default;
