@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 
+import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
@@ -14,6 +15,8 @@ export const route: Route = {
         orgId: 'orgId 组织 id',
         category: '公告分类，A 股及新三板，见下表，默认为全部',
         search: '标题关键字，默认为空',
+        pageNum: '页码，正整数，默认为 1',
+        pageSize: '每页公告数量，正整数，默认为 30',
     },
     name: '公告',
     maintainers: ['LogicJake', 'hillerliao', 'laampui', 'nczitzk'],
@@ -45,9 +48,24 @@ const plateMap = {
     fund: 'fund',
 };
 
+function parsePositiveInteger(value: string | undefined, fieldName: string, defaultValue: number): number {
+    if (!value) {
+        return defaultValue;
+    }
+
+    const parsedValue = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsedValue) || parsedValue < 1) {
+        throw new InvalidParameterError(`Invalid ${fieldName}. Expected a positive integer.`);
+    }
+
+    return parsedValue;
+}
+
 async function handler(ctx: Context) {
     const { column, code, orgId, category = 'all', search: searchKey = '' } = ctx.req.param();
     const plate = plateMap[column] ?? '';
+    const pageNum = parsePositiveInteger(ctx.req.query('pageNum'), 'pageNum', 1);
+    const pageSize = parsePositiveInteger(ctx.req.query('pageSize'), 'pageSize', 30);
 
     const url = `http://www.cninfo.com.cn/new/disclosure/stock?stockCode=${code}&orgId=${orgId}`;
     const apiUrl = 'http://www.cninfo.com.cn/new/hisAnnouncement/query';
@@ -60,8 +78,8 @@ async function handler(ctx: Context) {
         body: new URLSearchParams({
             stock: `${code},${orgId}`,
             tabName: 'fulltext',
-            pageSize: '30',
-            pageNum: '1',
+            pageSize: pageSize.toString(),
+            pageNum: pageNum.toString(),
             column,
             category: category === 'all' ? '' : category,
             plate,
