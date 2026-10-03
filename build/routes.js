@@ -59981,6 +59981,7 @@ export default {
         ],
         "view": 0,
         "example": "/eastmoney/report/strategyreport?beginDate=2026-01-01&endDate=2026-01-31",
+        "description": "可通过查询参数 `startDate`（兼容别名 `beginDate`）和 `endDate` 指定日期范围。开始日期默认为当前日期前 2 天，结束日期默认为当前日期。日期支持 `YYYYMMDD`、`YYYY-MM-DD`、`YYYY/MM/DD`、`YYYY.MM.DD`，带分隔符时月份和日期可省略前导零。同时提供非空的 `startDate` 和 `beginDate` 时，优先使用 `startDate`。",
         "parameters": {
           "category": {
             "description": "研报类型",
@@ -60006,9 +60007,7 @@ export default {
                 "label": "个股研报"
               }
             ]
-          },
-          "beginDate": "查询开始日期，格式为 `YYYY-MM-DD`，默认为当前日期前 2 天",
-          "endDate": "查询结束日期，格式为 `YYYY-MM-DD`，默认为当前日期"
+          }
         },
         "features": {
           "requireConfig": false,
