@@ -6,6 +6,7 @@ import type { DataItem, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
+import { normalizeDateParameter } from '@/utils/normalize-date-parameter';
 import { parseDateInTimezone } from '@/utils/parse-date-in-timezone';
 
 const reportType = {
@@ -33,34 +34,19 @@ const qType = {
 };
 
 const categories = Object.keys(reportType) as Array<keyof typeof reportType>;
-const datePattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const pageSize = 20;
 
 const baseUrl = 'https://data.eastmoney.com';
 const reqUrl = 'https://reportapi.eastmoney.com/report/jg';
 const reqUrlStock = 'https://reportapi.eastmoney.com/report/list2';
 
-function isValidDate(dateString: string): boolean {
-    if (!datePattern.test(dateString)) {
-        return false;
-    }
-
-    const [year, month, day] = dateString.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-
-    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
-}
-
 function parseDateParameter(value: string, fieldName: string, defaultValue: string) {
     if (!value) {
         return defaultValue;
     }
 
-    if (!isValidDate(value)) {
-        throw new InvalidParameterError(`Invalid ${fieldName} format. Expected YYYY-MM-DD.`);
-    }
-
-    return value;
+    const normalizedDate = normalizeDateParameter(value, fieldName);
+    return `${normalizedDate.slice(0, 4)}-${normalizedDate.slice(4, 6)}-${normalizedDate.slice(6, 8)}`;
 }
 
 async function request(category: string, beginTime: string, endTime: string, pageNo: number, pageSize: number): Promise<DataItem[]> {
@@ -109,14 +95,15 @@ async function handler(ctx) {
     if (!categories.includes(category as keyof typeof reportType)) {
         throw new InvalidParameterError(`Invalid category: ${category}. Expected one of ${categories.join(', ')}`);
     }
-    const beginDate = parseDateParameter(ctx.req.query('beginDate') ?? '', 'beginDate', dayjs().subtract(2, 'day').format('YYYY-MM-DD'));
+    const startDate = ctx.req.query('startDate');
+    const beginDate = parseDateParameter(startDate || ctx.req.query('beginDate') || '', startDate ? 'startDate' : 'beginDate', dayjs().subtract(2, 'day').format('YYYY-MM-DD'));
     const endDate = parseDateParameter(ctx.req.query('endDate') ?? '', 'endDate', dayjs().format('YYYY-MM-DD'));
 
     const items: DataItem[] = [];
     let page = 1;
 
     while (true) {
-        // 后续请求依赖当前页返回的数据量，无法并行请求
+        // Subsequent requests depend on the number of reports returned by the current page.
         // eslint-disable-next-line no-await-in-loop
         const currentItems = (await request(category, beginDate, endDate, page, pageSize)) ?? [];
 
@@ -162,6 +149,8 @@ export const route: Route = {
     categories: ['finance'],
     view: ViewType.Articles,
     example: '/eastmoney/report/strategyreport?beginDate=2026-01-01&endDate=2026-01-31',
+    description:
+        '可通过查询参数 `startDate`（兼容别名 `beginDate`）和 `endDate` 指定日期范围。开始日期默认为当前日期前 2 天，结束日期默认为当前日期。日期支持 `YYYYMMDD`、`YYYY-MM-DD`、`YYYY/MM/DD`、`YYYY.MM.DD`，带分隔符时月份和日期可省略前导零。同时提供非空的 `startDate` 和 `beginDate` 时，优先使用 `startDate`。',
     parameters: {
         category: {
             description: '研报类型',
@@ -173,8 +162,6 @@ export const route: Route = {
                 { value: 'stock', label: '个股研报' },
             ],
         },
-        beginDate: '查询开始日期，格式为 `YYYY-MM-DD`，默认为当前日期前 2 天',
-        endDate: '查询结束日期，格式为 `YYYY-MM-DD`，默认为当前日期',
     },
     features: {
         requireConfig: false,
