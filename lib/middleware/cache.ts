@@ -5,6 +5,7 @@ import { config } from '@/config';
 import RequestInProgressError from '@/errors/types/request-in-progress';
 import type { Data } from '@/types';
 import cacheModule from '@/utils/cache/index';
+import { normalizeDateParameter } from '@/utils/normalize-date-parameter';
 
 const bypassList = new Set(['/', '/robots.txt', '/logo.png', '/favicon.ico']);
 
@@ -23,7 +24,14 @@ const middleware: MiddlewareHandler = async (ctx, next) => {
     const limit = ctx.req.query('limit') ? `:${ctx.req.query('limit')}` : '';
     const pageNum = ctx.req.query('pageNum') ? `:${ctx.req.query('pageNum')}` : '';
     const pageSize = ctx.req.query('pageSize') ? `:${ctx.req.query('pageSize')}` : '';
-    const cacheKey = requestPath + format + limit + pageNum + pageSize;
+    const isEastmoneyReport = /^\/eastmoney\/report\/[^/]+\/?$/.test(requestPath);
+    const dateParameters = isEastmoneyReport
+        ? { startDate: ctx.req.query('startDate') || ctx.req.query('beginDate'), endDate: ctx.req.query('endDate') }
+        : { startDate: ctx.req.query('startDate'), beginDate: ctx.req.query('beginDate'), endDate: ctx.req.query('endDate') };
+    const dates = Object.entries(dateParameters)
+        .map(([name, value]) => (value ? `:${name}=${isEastmoneyReport ? normalizeDateParameter(value, name) : encodeURIComponent(value)}` : ''))
+        .join('');
+    const cacheKey = requestPath + format + limit + pageNum + pageSize + dates;
     const key = 'rsshub:koa-redis-cache:' + h64ToString(cacheKey);
     const controlKey = 'rsshub:path-requested:' + h64ToString(cacheKey);
 
